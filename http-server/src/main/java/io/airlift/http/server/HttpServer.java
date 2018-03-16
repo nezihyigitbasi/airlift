@@ -32,6 +32,7 @@ import org.eclipse.jetty.security.LoginService;
 import org.eclipse.jetty.security.SecurityHandler;
 import org.eclipse.jetty.security.authentication.BasicAuthenticator;
 import org.eclipse.jetty.server.ConnectionFactory;
+import org.eclipse.jetty.server.HttpChannel.Listener;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.RequestLog;
@@ -181,7 +182,7 @@ public class HttpServer
             ConnectionStatistics connectionStats = new ConnectionStatistics();
             httpConnector.addBean(connectionStats);
             this.httpConnectionStats = new ConnectionStats(connectionStats);
-
+            httpConnector.addBean(createChannelListener(config));
             server.addConnector(httpConnector);
         }
 
@@ -225,7 +226,7 @@ public class HttpServer
             ConnectionStatistics connectionStats = new ConnectionStatistics();
             httpsConnector.addBean(connectionStats);
             this.httpsConnectionStats = new ConnectionStats(connectionStats);
-
+            httpsConnector.addBean(createChannelListener(config));
             server.addConnector(httpsConnector);
         }
 
@@ -396,6 +397,18 @@ public class HttpServer
         securityHandler.setAuthenticator(new BasicAuthenticator());
         securityHandler.setConstraintMappings(Arrays.asList(constraintMapping));
         return securityHandler;
+    }
+
+    private static Listener createChannelListener(HttpServerConfig config)
+            throws IOException
+    {
+        DelimitedChannelListenerLog channelLog = new DelimitedChannelListenerLog(
+                "/data/var/log/http-channel-listener.log",
+                config.getLogHistory(),
+                config.getQueueSize(),
+                config.getLogMaxFileSize().toBytes());
+
+        return new AirliftChannelListener(channelLog);
     }
 
     private static RequestLogHandler createLogHandler(HttpServerConfig config, TraceTokenManager tokenManager, EventClient eventClient)
