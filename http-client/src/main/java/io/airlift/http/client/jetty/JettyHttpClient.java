@@ -1,5 +1,6 @@
 package io.airlift.http.client.jetty;
 
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.net.HostAndPort;
 import com.google.common.primitives.Ints;
@@ -15,6 +16,7 @@ import io.airlift.http.client.jetty.HttpClientLogger.RequestInfo;
 import io.airlift.http.client.jetty.HttpClientLogger.ResponseInfo;
 import io.airlift.http.client.spnego.KerberosConfig;
 import io.airlift.http.client.spnego.SpnegoAuthenticationProtocolHandler;
+import io.airlift.log.Logger;
 import io.airlift.units.Duration;
 import org.eclipse.jetty.client.DuplexConnectionPool;
 import org.eclipse.jetty.client.HttpClient;
@@ -84,6 +86,7 @@ public class JettyHttpClient
         JettyLogging.setup();
     }
 
+    private static final Logger LOG = Logger.get(JettyHttpClient.class);
     private static final String PRESTO_STATS_KEY = "presto_stats";
     private static final long SWEEP_PERIOD_MILLIS = 5000;
 
@@ -181,6 +184,8 @@ public class JettyHttpClient
         else {
             httpClient = new HttpClient(transport, sslContextFactory);
         }
+
+        httpClient.addBean(new AirliftSelectorListener());
 
         httpClient.setMaxConnectionsPerDestination(config.getMaxConnectionsPerServer());
         httpClient.setMaxRequestsQueuedPerDestination(config.getMaxRequestsQueuedPerDestination());
@@ -488,6 +493,18 @@ public class JettyHttpClient
     {
         HttpRequest jettyRequest = (HttpRequest) httpClient.newRequest(finalRequest.getUri());
 
+        jettyRequest.onResponseBegin(r -> r.getRequest().attribute("responseBegin", System.nanoTime()))
+                .onComplete(r -> {
+                    Object beginTimestamp = r.getRequest().getAttributes().get("responseBegin");
+                    if (beginTimestamp != null) {
+                        long elapsed = System.nanoTime() - (Long) r.getRequest().getAttributes().get("responseBegin");
+                        if (NANOSECONDS.toSeconds(elapsed) > 5) {
+                            LOG.info("[HTTP2-TESTS] Application processing took too long: %d ms, stack: %s",
+                                    NANOSECONDS.toMillis(elapsed),
+                                    Throwables.getStackTraceAsString(new Throwable()));
+                        }
+                    }
+                });
         JettyRequestListener listener = new JettyRequestListener(finalRequest.getUri());
         jettyRequest.onRequestBegin(request -> listener.onRequestBegin());
         jettyRequest.onRequestSuccess(request -> listener.onRequestEnd());
