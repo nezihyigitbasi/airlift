@@ -2,6 +2,7 @@ package io.airlift.http.client.jetty;
 
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
+import com.google.common.io.Files;
 import com.google.common.net.HostAndPort;
 import com.google.common.primitives.Ints;
 import io.airlift.http.client.BodyGenerator;
@@ -29,6 +30,7 @@ import org.eclipse.jetty.client.WWWAuthenticationProtocolHandler;
 import org.eclipse.jetty.client.api.ContentProvider;
 import org.eclipse.jetty.client.api.Destination;
 import org.eclipse.jetty.client.api.Response;
+import org.eclipse.jetty.client.api.Result;
 import org.eclipse.jetty.client.http.HttpClientTransportOverHTTP;
 import org.eclipse.jetty.client.http.HttpConnectionOverHTTP;
 import org.eclipse.jetty.client.util.BytesContentProvider;
@@ -51,18 +53,24 @@ import org.weakref.jmx.Flatten;
 import org.weakref.jmx.Managed;
 import org.weakref.jmx.Nested;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -78,6 +86,7 @@ import static java.lang.String.format;
 import static java.util.Objects.requireNonNull;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 
 public class JettyHttpClient
         implements io.airlift.http.client.HttpClient
@@ -489,22 +498,125 @@ public class JettyHttpClient
         return request;
     }
 
+    class WriteClientDumpTask
+            implements Runnable
+    {
+        private final String clientDump;
+        private final String fileNamePrefix;
+
+        public WriteClientDumpTask(String clientDump, String fileNamePrefix)
+        {
+            this.clientDump = requireNonNull(clientDump, "clientDump is null");
+            this.fileNamePrefix = requireNonNull(fileNamePrefix, "fileNamePrefix is null");
+        }
+
+        @Override
+        public void run()
+        {
+            try {
+                String dumpFileName = format("/data/%s_client.dump", fileNamePrefix);
+                LOG.info("Writing dump %s", dumpFileName);
+                Files.write(clientDump, new File(dumpFileName), Charset.defaultCharset());
+            }
+            catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    class JettyHttpClientListener
+            extends org.eclipse.jetty.client.api.Response.Listener.Adapter
+    {
+        private final ConcurrentScheduler scheduler = new ConcurrentScheduler(8, 8, "request-listener");
+        private final ExecutorService writerPool = Executors.newFixedThreadPool(1);
+
+        private int dumpCounter;
+        private Scheduler.Task currentTask;
+
+        @Override
+        public void onBegin(Response response)
+        {
+            response.getRequest().attribute("responseBegin", System.nanoTime());
+            ArrayList<Long> list = new ArrayList<>();
+            list.add(System.nanoTime());
+            response.getRequest().attribute("times", list);
+            currentTask = scheduler.schedule(this::dumpClient, 3, SECONDS);
+        }
+
+        @Override
+        public void onContent(Response response, ByteBuffer content)
+        {
+            currentTask.cancel();
+            List<Long> list = (List<Long>) response.getRequest().getAttributes().get("times");
+            list.add(System.nanoTime());
+            currentTask = scheduler.schedule(this::dumpClient, 3, SECONDS);
+        }
+
+        @Override
+        public void onComplete(Result result)
+        {
+            currentTask.cancel();
+            Object beginTimestamp = result.getRequest().getAttributes().get("responseBegin");
+            if (beginTimestamp != null) {
+                long elapsed = System.nanoTime() - (Long) result.getRequest().getAttributes().get("responseBegin");
+                if (NANOSECONDS.toSeconds(elapsed) > 5) {
+                    LOG.info("[HTTP2-TESTS] Application processing took too long: %d ms, stack: %s",
+                            NANOSECONDS.toMillis(elapsed),
+                            Throwables.getStackTraceAsString(new Throwable()));
+                }
+            }
+
+            List<Long> list = (List<Long>) result.getRequest().getAttributes().get("times");
+            if (list != null) {
+                if (NANOSECONDS.toSeconds(list.get(list.size() - 1) - list.get(0)) >= 5) {
+                    LOG.info(" It took more than 5s from onBegin to last onContent %s", timesToString(list));
+                }
+            }
+        }
+
+        public void dumpClient()
+        {
+            String now = LocalDateTime.now().toString();
+            writerPool.submit(new WriteClientDumpTask(httpClient.dump(), now));
+            if (dumpCounter++ < 1) {
+                currentTask = scheduler.schedule(this::dumpClient, 1, SECONDS);
+            }
+        }
+    }
+
+    private static String timesToString(List<Long> times)
+    {
+        if (times == null) {
+            return "";
+        }
+        StringBuilder result = new StringBuilder();
+        if (times.size() == 1) {
+            result.append(times.get(0));
+            return result.toString();
+        }
+
+        long previousTimestamp = times.get(0);
+        for (int i = 1; i < times.size(); i++) {
+            long timestamp = times.get(i);
+            result.append(NANOSECONDS.toMillis(timestamp - previousTimestamp));
+            previousTimestamp = timestamp;
+
+            if (i != times.size() - 1) {
+                result.append(", ");
+            }
+        }
+        return result.toString();
+    }
+
     private HttpRequest buildJettyRequest(Request finalRequest)
     {
         HttpRequest jettyRequest = (HttpRequest) httpClient.newRequest(finalRequest.getUri());
 
-        jettyRequest.onResponseBegin(r -> r.getRequest().attribute("responseBegin", System.nanoTime()))
-                .onComplete(r -> {
-                    Object beginTimestamp = r.getRequest().getAttributes().get("responseBegin");
-                    if (beginTimestamp != null) {
-                        long elapsed = System.nanoTime() - (Long) r.getRequest().getAttributes().get("responseBegin");
-                        if (NANOSECONDS.toSeconds(elapsed) > 5) {
-                            LOG.info("[HTTP2-TESTS] Application processing took too long: %d ms, stack: %s",
-                                    NANOSECONDS.toMillis(elapsed),
-                                    Throwables.getStackTraceAsString(new Throwable()));
-                        }
-                    }
-                });
+        JettyHttpClientListener clientListener = new JettyHttpClientListener();
+        jettyRequest.onResponseBegin(clientListener);
+        jettyRequest.onResponseContent(clientListener);
+        jettyRequest.onComplete(clientListener);
+
         JettyRequestListener listener = new JettyRequestListener(finalRequest.getUri());
         jettyRequest.onRequestBegin(request -> listener.onRequestBegin());
         jettyRequest.onRequestSuccess(request -> listener.onRequestEnd());

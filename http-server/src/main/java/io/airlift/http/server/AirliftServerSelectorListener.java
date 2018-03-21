@@ -38,7 +38,7 @@ public class AirliftServerSelectorListener
     {
         long now = System.nanoTime();
         List<Long> times = selections.remove(selector);
-        LOG.info("[HTTP2-TESTS] Selection took %d ms, number of keys: %d", NANOSECONDS.toMillis(now - times.get(0)), times.size());
+//        LOG.info("[HTTP2-TESTS] Selection took %d ms, number of keys: %d", NANOSECONDS.toMillis(now - times.get(0)), times.size());
         // dump the list if it takes more than 5s
         if (NANOSECONDS.toSeconds(now - times.get(0)) >= 5) {
             LOG.info("[HTTP2-TESTS] Selected key times: %s", times.stream()
