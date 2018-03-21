@@ -183,6 +183,7 @@ public class HttpServer
             httpConnector.addBean(connectionStats);
             this.httpConnectionStats = new ConnectionStats(connectionStats);
             httpConnector.addBean(createChannelListener(config));
+            httpConnector.addBean(new AirliftServerSelectorListener());
             server.addConnector(httpConnector);
         }
 
@@ -227,6 +228,7 @@ public class HttpServer
             httpsConnector.addBean(connectionStats);
             this.httpsConnectionStats = new ConnectionStats(connectionStats);
             httpsConnector.addBean(createChannelListener(config));
+            httpsConnector.addBean(new AirliftServerSelectorListener());
             server.addConnector(httpsConnector);
         }
 
