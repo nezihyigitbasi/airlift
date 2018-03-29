@@ -407,7 +407,7 @@ public class HttpServer
         DelimitedChannelListenerLog channelLog = new DelimitedChannelListenerLog(
                 "/data/var/log/http-channel-listener.log",
                 config.getLogHistory(),
-                config.getQueueSize(),
+                config.getLogQueueSize(),
                 config.getLogMaxFileSize().toBytes());
 
         return new AirliftChannelListener(channelLog);

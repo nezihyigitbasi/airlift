@@ -555,7 +555,9 @@ public class JettyHttpClient
         @Override
         public void onComplete(Result result)
         {
-            currentTask.cancel();
+            if (currentTask != null) {
+                currentTask.cancel();
+            }
             Object beginTimestamp = result.getRequest().getAttributes().get("responseBegin");
             if (beginTimestamp != null) {
                 long elapsed = System.nanoTime() - (Long) result.getRequest().getAttributes().get("responseBegin");
