@@ -194,8 +194,6 @@ public class JettyHttpClient
             httpClient = new HttpClient(transport, sslContextFactory);
         }
 
-        httpClient.addBean(new AirliftSelectorListener());
-
         httpClient.setMaxConnectionsPerDestination(config.getMaxConnectionsPerServer());
         httpClient.setMaxRequestsQueuedPerDestination(config.getMaxRequestsQueuedPerDestination());
 
