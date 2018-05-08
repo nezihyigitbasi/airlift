@@ -24,7 +24,6 @@ import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.handler.AbstractHandler;
 
 import javax.annotation.Nullable;
-import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
@@ -55,22 +54,25 @@ public class ClassPathResourceHandler
     private final String baseUri;
     private final String classPathResourceBase;
     private final List<String> welcomeFiles;
+    private final List<String> excludedResourcePathPrefixes;
 
     public ClassPathResourceHandler(String baseUri, String classPathResourceBase, String... welcomeFiles)
     {
-        this(baseUri, classPathResourceBase, ImmutableList.copyOf(welcomeFiles));
+        this(baseUri, classPathResourceBase, ImmutableList.copyOf(welcomeFiles), ImmutableList.of());
     }
 
-    public ClassPathResourceHandler(String baseUri, String classPathResourceBase, List<String> welcomeFiles)
+    public ClassPathResourceHandler(String baseUri, String classPathResourceBase, List<String> welcomeFiles, List<String> excludedResourcePathPrefixes)
     {
         requireNonNull(baseUri, "baseUri is null");
         requireNonNull(classPathResourceBase, "classPathResourceBase is null");
         requireNonNull(welcomeFiles, "welcomeFiles is null");
+        requireNonNull(excludedResourcePathPrefixes, "excludedResourcePathPrefixes is null");
 
         baseUri = baseUri.startsWith("/") ? baseUri : '/' + baseUri;
         baseUri = baseUri.endsWith("/") ? baseUri.substring(baseUri.length() - 1) : baseUri;
         this.baseUri = baseUri;
 
+        this.excludedResourcePathPrefixes = excludedResourcePathPrefixes;
         this.classPathResourceBase = classPathResourceBase;
 
         ImmutableList.Builder<String> files = ImmutableList.builder();
@@ -85,9 +87,9 @@ public class ClassPathResourceHandler
 
     @Override
     public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response)
-            throws IOException, ServletException
+            throws IOException
     {
-        if (baseRequest.isHandled()) {
+        if (!shouldHandle(baseRequest)) {
             return;
         }
 
@@ -136,6 +138,21 @@ public class ClassPathResourceHandler
         finally {
             closeQuietly(resourceStream);
         }
+    }
+
+    private boolean shouldHandle(Request request)
+    {
+        if (request.isHandled()) {
+            return false;
+        }
+
+        for (String prefix : excludedResourcePathPrefixes) {
+            if (request.getPathInfo().startsWith(prefix)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private URL getResourcePath(HttpServletRequest request)

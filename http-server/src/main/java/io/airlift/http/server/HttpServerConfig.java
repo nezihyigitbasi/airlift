@@ -105,6 +105,8 @@ public class HttpServerConfig
     private int adminMinThreads = 2;
     private int adminMaxThreads = 200;
 
+    private List<String> excludedStaticResourcePathPrefixes = ImmutableList.of();
+
     private boolean showStackTrace = true;
 
     public boolean isHttpEnabled()
@@ -518,6 +520,22 @@ public class HttpServerConfig
     public HttpServerConfig setMaxRequestHeaderSize(DataSize maxRequestHeaderSize)
     {
         this.maxRequestHeaderSize = maxRequestHeaderSize;
+        return this;
+    }
+
+    public List<String> getExcludedStaticResourcePathPrefixes()
+    {
+        return excludedStaticResourcePathPrefixes;
+    }
+
+    @Config("http-server.excluded-static-resource-path-prefixes")
+    public HttpServerConfig setExcludedStaticResourcePathPrefixes(String excludedStaticResourcePathPrefixes)
+    {
+        this.excludedStaticResourcePathPrefixes = Splitter
+                .on(',')
+                .trimResults()
+                .omitEmptyStrings()
+                .splitToList(requireNonNull(excludedStaticResourcePathPrefixes, "excludedStaticResourcePathPrefixes is null"));
         return this;
     }
 
