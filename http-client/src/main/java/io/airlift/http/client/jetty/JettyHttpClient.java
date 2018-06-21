@@ -841,17 +841,12 @@ public class JettyHttpClient
         if (finished == 0) {
             finished = now;
         }
-        return format("%s\t%.1f\t%.1f\t%.1f\t%.1f",
+        return format("%s\t%d\t%d\t%d\t%d",
                 listener.getUri(),
-                nanosToMillis(requestStarted - created),
-                nanosToMillis(requestFinished - requestStarted),
-                nanosToMillis(responseStarted - requestFinished),
-                nanosToMillis(finished - responseStarted));
-    }
-
-    private static double nanosToMillis(long nanos)
-    {
-        return new Duration(nanos, NANOSECONDS).getValue(MILLISECONDS);
+                NANOSECONDS.toMillis(requestStarted - created),
+                NANOSECONDS.toMillis(requestFinished - requestStarted),
+                NANOSECONDS.toMillis(responseStarted - requestFinished),
+                NANOSECONDS.toMillis(finished - responseStarted));
     }
 
     @Override
